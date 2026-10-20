@@ -7,6 +7,10 @@ on:
         description: 'Tautan halaman kitab, pisahkan dengan koma atau spasi'
         required: true
         default: 'https://shamela.ws/book/12085/17'
+      ulang:
+        description: 'Berapa kali tiap tautan diuji (1-10)'
+        required: false
+        default: '4'
 
 jobs:
   uji:
@@ -19,4 +23,5 @@ jobs:
       - name: Jalankan uji
         env:
           URLS: ${{ inputs.urls }}
+          ULANG: ${{ inputs.ulang }}
         run: node functions/scripts/uji-situs.mjs | tee -a "$GITHUB_STEP_SUMMARY"
