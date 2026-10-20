@@ -53,7 +53,7 @@ test('fetchKitab: sukses, redirect ke domain luar ditolak, error situs', async (
   assert.equal(r.url, 'https://shamela.ws/book/1/3');
 
   await assert.rejects(fetchKitab('https://shamela.ws/x', { fetchImpl: async () => resp('x', { status: 404 }) }), { code: 'SUMBER_NOT_FOUND' });
-  await assert.rejects(fetchKitab('https://shamela.ws/x', { fetchImpl: async () => resp('x', { status: 403 }) }), { code: 'SUMBER_BLOCKED' });
+  await assert.rejects(fetchKitab('https://shamela.ws/x', { fetchImpl: async () => resp('x', { status: 403 }), retryDelayMs: 0 }), { code: 'SUMBER_BLOCKED' });
   await assert.rejects(fetchKitab('https://shamela.ws/x', { fetchImpl: async () => resp('%PDF', { type: 'application/pdf' }) }), { code: 'SUMBER_BUKAN_TEKS' });
   await assert.rejects(fetchKitab('https://shamela.ws/x', { fetchImpl: async () => resp('<html><body><p>English only</p></body></html>') }), { code: 'TEKS_TIDAK_DITEMUKAN' });
   await assert.rejects(fetchKitab('https://shamela.ws/x', { maxBytes: 100, fetchImpl: async () => resp(PAGE) }), { code: 'SUMBER_TOO_LARGE' });
@@ -91,4 +91,17 @@ test('fetchKitab: hasil memuat kitabId dan idx untuk URL shamela', async () => {
   const r = await fetchKitab('https://shamela.ws/book/12085/17', { fetchImpl: async () => resp(PAGE) });
   assert.equal(r.kitabId, 'shamela_12085');
   assert.equal(r.idx, '17');
+});
+
+test('fetchKitab: 403 sesaat (tantangan Cloudflare) dicoba ulang sekali, 429 tidak', async () => {
+  let n = 0;
+  const r = await fetchKitab('https://shamela.ws/book/12085/17', { retryDelayMs: 0, fetchImpl: async () => (++n === 1 ? resp('', { status: 403 }) : resp(PAGE)) });
+  assert.equal(n, 2);
+  assert.equal(r.idx, '17');
+  let m = 0;
+  await assert.rejects(fetchKitab('https://shamela.ws/x', { retryDelayMs: 0, fetchImpl: async () => { m++; return resp('', { status: 429 }); } }), { code: 'SUMBER_BLOCKED' });
+  assert.equal(m, 1);
+  let k = 0;
+  await assert.rejects(fetchKitab('https://shamela.ws/x', { retryDelayMs: 0, fetchImpl: async () => { k++; return resp('', { status: 403 }); } }), { code: 'SUMBER_BLOCKED' });
+  assert.equal(k, 2); // hanya satu kali ulang
 });
