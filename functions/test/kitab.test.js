@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseKitabUrl, htmlToArabicText, parseTitle, fetchKitab, findByClass, DEFAULT_HOSTS } from '../src/kitabFetch.js';
+import { parseKitabUrl, htmlToArabicText, parseTitle, parseBookUrl, fetchKitab, findByClass, DEFAULT_HOSTS } from '../src/kitabFetch.js';
 
 const ISI = 'الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ وَالصَّلَاةُ وَالسَّلَامُ عَلَى أَشْرَفِ الْمُرْسَلِينَ';
 const PAGE = `<!doctype html><html><head><title>ص3 - الفواكه العذاب - تقريظ - المكتبة الشاملة.</title><script>var x="مرحبا بكم في الموقع الإلكتروني للمكتبة";</script></head>
@@ -71,4 +71,24 @@ test('fetchKitab: teks panjang dipotong di batas baris dan ditandai', async () =
 test('fetchKitab: timeout menjadi 504', async () => {
   const slow = (u, { signal }) => new Promise((_, rej) => signal.addEventListener('abort', () => rej(Object.assign(new Error('a'), { name: 'AbortError' }))));
   await assert.rejects(fetchKitab('https://shamela.ws/x', { timeoutMs: 20, fetchImpl: slow }), { code: 'SUMBER_TIMEOUT', status: 504 });
+});
+
+test('htmlToArabicText: penanda paragraf #pN dari shamela dibuang', () => {
+  const html = `<html><head><title>ص21 - كتاب - الدليل - المكتبة الشاملة</title></head><body><div class="nass"><p>${ISI}<a href="#p5">#p5</a></p><p>${ISI} <a href="#p6">#p6</a></p></div></body></html>`;
+  const { teks } = htmlToArabicText(html);
+  assert.ok(!/#p\d/.test(teks));
+  assert.equal(teks.split('\n').length, 2);
+});
+
+test('parseBookUrl: ambil kitabId dan idx dari URL, abaikan situs/pola lain', () => {
+  assert.deepEqual(parseBookUrl('https://shamela.ws/book/12085/17#p1'), { kitabId: 'shamela_12085', bookId: '12085', idx: '17' });
+  assert.deepEqual(parseBookUrl('https://www.al-maktaba.org/book/33/5'), { kitabId: 'maktaba_33', bookId: '33', idx: '5' });
+  assert.deepEqual(parseBookUrl('https://shamela.ws/book/12085'), {});
+  assert.deepEqual(parseBookUrl('https://archive.org/details/x'), {});
+});
+
+test('fetchKitab: hasil memuat kitabId dan idx untuk URL shamela', async () => {
+  const r = await fetchKitab('https://shamela.ws/book/12085/17', { fetchImpl: async () => resp(PAGE) });
+  assert.equal(r.kitabId, 'shamela_12085');
+  assert.equal(r.idx, '17');
 });
