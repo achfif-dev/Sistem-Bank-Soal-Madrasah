@@ -73,7 +73,7 @@ const blocksToText = (html) => decode(
   html
     .replace(/<br\s*\/?>|<\/(p|div|li|tr|h[1-6]|section|article|blockquote)>/gi, '\n')
     .replace(/<[^>]+>/g, ''),
-).split('\n').map((l) => l.replace(/[ \t ]+/g, ' ').trim()).filter(Boolean);
+).split('\n').map((l) => l.replace(/\s*#p\d+\b/g, '').replace(/[ \t ]+/g, ' ').trim()).filter(Boolean);
 
 export function htmlToArabicText(html, { plain = false } = {}) {
   if (plain) {
@@ -101,6 +101,19 @@ export function htmlToArabicText(html, { plain = false } = {}) {
 export function parseTitle(title) {
   const m = /^ص\s*(\d+)\s+-\s+(.+?)\s+-\s+/.exec(title);
   return m ? { hal: m[1], nama: m[2].trim() } : { hal: '', nama: '' };
+}
+
+const SUMBER_KODE = { 'shamela.ws': 'shamela', 'al-maktaba.org': 'maktaba' };
+
+/** "https://shamela.ws/book/12085/17" -> {kitabId:'shamela_12085', bookId:'12085', idx:'17'}.
+ *  idx = nomor urutan halaman di URL; BUKAN nomor halaman cetak (hal 21 bisa berada di idx 17). */
+export function parseBookUrl(href) {
+  try {
+    const u = new URL(href);
+    const kode = SUMBER_KODE[u.hostname.toLowerCase().replace(/^www\./, '')];
+    const m = /^\/book\/(\d+)\/(\d+)\/?$/.exec(u.pathname);
+    return kode && m ? { kitabId: `${kode}_${m[1]}`, bookId: m[1], idx: m[2] } : {};
+  } catch { return {}; }
 }
 
 function cutAtBoundary(text, max) {
@@ -164,7 +177,7 @@ export async function fetchKitab(rawUrl, { allowedHosts = DEFAULT_HOSTS, fetchIm
       throw new ApiError(422, 'TEKS_TIDAK_DITEMUKAN', 'Tidak ada teks Arab yang bisa diambil dari halaman ini. Salin teksnya manual lalu tempel di kolom teks.');
     }
     const cut = cutAtBoundary(teks, MAX_TEKS);
-    return { url: url.href, host: url.hostname, judul: title.slice(0, 200), ...parseTitle(title), teks: cut.teks, terpotong: cut.terpotong };
+    return { url: url.href, host: url.hostname, judul: title.slice(0, 200), ...parseTitle(title), ...parseBookUrl(url.href), teks: cut.teks, terpotong: cut.terpotong };
   } catch (e) {
     if (e instanceof ApiError) throw e;
     if (e && e.name === 'AbortError') throw new ApiError(504, 'SUMBER_TIMEOUT', 'Situs sumber terlalu lama merespons. Coba lagi.');
