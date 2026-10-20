@@ -1,1 +1,5 @@
-3
+{
+  "projects": {
+    "default": "GANTI-DENGAN-PROJECT-ID-FIREBASE"
+  }
+}
