@@ -142,11 +142,12 @@ async function readCapped(res, maxBytes) {
   return buf;
 }
 
-export async function fetchKitab(rawUrl, { allowedHosts = DEFAULT_HOSTS, fetchImpl = fetch, maxBytes = 2_000_000, timeoutMs = 10_000 } = {}) {
+export async function fetchKitab(rawUrl, { allowedHosts = DEFAULT_HOSTS, fetchImpl = fetch, maxBytes = 2_000_000, timeoutMs = 10_000, retryDelayMs = 2000 } = {}) {
   let url = parseKitabUrl(rawUrl, allowedHosts);
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
+    const ambil = async () => {
     let res;
     for (let hop = 0; ; hop++) {
       res = await fetchImpl(url.href, {
@@ -160,6 +161,12 @@ export async function fetchKitab(rawUrl, { allowedHosts = DEFAULT_HOSTS, fetchIm
       }
       break;
     }
+    return res;
+    };
+    let res = await ambil();
+    // Uji nyata (shamela.ws via GitHub Actions): permintaan pertama ditantang Cloudflare (403), tiga berikutnya lolos.
+    // Maka 403 dicoba ulang SEKALI setelah jeda; 429 (rate limit) tidak diulang.
+    if (res.status === 403 && retryDelayMs >= 0) { await new Promise((r) => setTimeout(r, retryDelayMs)); res = await ambil(); }
     if (res.status === 404) throw new ApiError(404, 'SUMBER_NOT_FOUND', 'Halaman tidak ditemukan di situs sumber. Periksa tautannya.');
     if (res.status === 429 || res.status === 403) throw new ApiError(502, 'SUMBER_BLOCKED', 'Situs sumber menolak permintaan otomatis. Salin teksnya manual lalu tempel di kolom teks.');
     if (res.status !== 200) throw new ApiError(502, 'SUMBER_ERROR', `Situs sumber membalas dengan kode ${res.status}.`);
