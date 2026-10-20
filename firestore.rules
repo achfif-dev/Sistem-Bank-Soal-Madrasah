@@ -1,0 +1,110 @@
+rules_version = '2';
+
+// Peran: pending (baru daftar), penyusun, editor, admin, nonaktif.
+// Profil pengguna dibuat oleh Cloud Function /api/session (klien tidak bisa membuatnya).
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function userPath() { return /databases/$(database)/documents/users/$(request.auth.uid); }
+    function hasProfile() { return signedIn() && exists(userPath()); }
+    function role() { return get(userPath()).data.role; }
+    function isStaff() { return hasProfile() && role() in ['penyusun', 'editor', 'admin']; }
+    function isReviewer() { return hasProfile() && role() in ['editor', 'admin']; }
+    function isAdmin() { return hasProfile() && role() == 'admin'; }
+
+    match /users/{uid} {
+      allow get: if signedIn() && (request.auth.uid == uid || isAdmin());
+      allow list: if isAdmin();
+      allow create, delete: if false;
+      // Hanya admin, hanya field role, dan tidak boleh mengubah perannya sendiri.
+      allow update: if isAdmin()
+        && request.auth.uid != uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role'])
+        && request.resource.data.role in ['pending', 'penyusun', 'editor', 'admin', 'nonaktif'];
+    }
+
+    match /soal/{id} {
+      function d() { return request.resource.data; }
+      function changed() { return request.resource.data.diff(resource.data).affectedKeys(); }
+
+      function validContent() {
+        return d().tingkat in ['Ibtidaiyah', 'Tsanawiyah', 'Aliyah']
+          && d().level in ['L1', 'L2', 'L3']
+          && d().mapel is string && d().mapel.size() <= 60
+          && d().nama is string && d().nama.size() <= 120
+          && d().juz is string && d().juz.size() <= 20
+          && d().hal is string && d().hal.size() <= 20
+          && d().teks is string && d().teks.size() <= 8000
+          && d().stimulus is string && d().stimulus.size() <= 3000
+          && d().pertanyaan is string && d().pertanyaan.size() <= 2000
+          && d().pembahasan is string && d().pembahasan.size() <= 4000
+          && d().indikator is string && d().indikator.size() <= 1000
+          && d().sumberUrl is string && d().sumberUrl.size() <= 500
+          && d().opsi is map
+          && d().kunci in ['', 'A', 'B', 'C', 'D', 'E']
+          && d().catatan is string && d().catatan.size() <= 1000;
+      }
+
+      function createKeys() {
+        return ['tingkat', 'mapel', 'level', 'nama', 'juz', 'hal', 'teks', 'stimulus', 'pertanyaan',
+                'indikator', 'opsi', 'kunci', 'pembahasan', 'sumberUrl', 'status', 'catatan',
+                'authorUid', 'authorName', 'createdAt', 'updatedAt'];
+      }
+      function authorKeys() {
+        return ['tingkat', 'mapel', 'level', 'nama', 'juz', 'hal', 'teks', 'stimulus', 'pertanyaan',
+                'indikator', 'opsi', 'kunci', 'pembahasan', 'sumberUrl', 'status', 'catatan', 'updatedAt'];
+      }
+      function reviewKeys() {
+        return ['status', 'catatan', 'reviewerUid', 'reviewerName', 'reviewedAt', 'updatedAt'];
+      }
+
+      allow read: if isStaff();
+
+      allow create: if isStaff()
+        && d().keys().hasOnly(createKeys())
+        && d().keys().hasAll(createKeys())
+        && d().authorUid == request.auth.uid
+        && d().authorName is string && d().authorName.size() <= 120
+        && d().status in ['draft', 'pending']
+        && d().catatan == ''
+        && d().createdAt == request.time
+        && d().updatedAt == request.time
+        && validContent();
+
+      allow update: if isStaff() && d().updatedAt == request.time && (
+        // 1) Penyusun mengubah soalnya sendiri selama masih draft atau perlu revisi.
+        ( resource.data.authorUid == request.auth.uid
+          && resource.data.status in ['draft', 'revision']
+          && d().status in ['draft', 'pending']
+          && changed().hasOnly(authorKeys())
+          && validContent() )
+        ||
+        // 2) Editor/admin menyetujui atau meminta revisi soal pending.
+        //    Editor tidak boleh meninjau soalnya sendiri.
+        ( isReviewer()
+          && resource.data.status == 'pending'
+          && (resource.data.authorUid != request.auth.uid || isAdmin())
+          && d().status in ['approved', 'revision']
+          && changed().hasOnly(reviewKeys())
+          && d().reviewerUid == request.auth.uid
+          && d().reviewedAt == request.time
+          && (d().status == 'approved' || (d().catatan is string && d().catatan.size() > 0 && d().catatan.size() <= 1000)) )
+        ||
+        // 3) Admin boleh mengubah isi dan status, tetapi tidak identitas penyusun.
+        ( isAdmin()
+          && d().authorUid == resource.data.authorUid
+          && d().createdAt == resource.data.createdAt
+          && d().status in ['draft', 'pending', 'approved', 'revision']
+          && validContent() )
+      );
+
+      allow delete: if isStaff() && (
+        (resource.data.authorUid == request.auth.uid && resource.data.status in ['draft', 'revision'])
+        || isAdmin()
+      );
+    }
+
+    // rate/{uid} dan koleksi lain: hanya Cloud Functions (Admin SDK). Klien ditolak.
+  }
+}
