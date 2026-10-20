@@ -1,1 +1,22 @@
-.github/workflows/uji-situs-kitab.yml
+name: Uji situs kitab
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'Tautan halaman kitab, pisahkan dengan koma atau spasi'
+        required: true
+        default: 'https://shamela.ws/book/12085/17'
+
+jobs:
+  uji:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Jalankan uji
+        env:
+          URLS: ${{ inputs.urls }}
+        run: node functions/scripts/uji-situs.mjs | tee -a "$GITHUB_STEP_SUMMARY"
